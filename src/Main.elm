@@ -2,36 +2,95 @@ module Main exposing (..)
 
 import Browser
 import Debug
-import Html exposing (Html, button, div, h1, img, input, p, span, text)
-import Html.Attributes exposing (class, classList, src, style, value)
-import Html.Events exposing (on, onClick, onInput)
+import Events exposing (..)
+import Html exposing (Html, button, div, h1, img, input, label, p, span, text)
+import Html.Attributes exposing (checked, class, classList, name, src, style, type_, value)
+import Html.Events exposing (on, onCheck, onClick, onInput)
+import Html.Keyed exposing (ul)
 import Json.Decode as JD
 import List
 import List.Extra as LE
 import Maybe
+import Process
 import Set exposing (Set)
+import Task
 
 
 
 ---- MODEL ----
 
 
+type Color
+    = White
+    | Green
+    | Blue
+
+
+colors =
+    [ White, Green, Blue ]
+
+
+colorFromString val =
+    case val of
+        "green" ->
+            Green
+
+        "blue" ->
+            Blue
+
+        _ ->
+            White
+
+
+stringFromColor clr =
+    case clr of
+        White ->
+            "white"
+
+        Green ->
+            "green"
+
+        Blue ->
+            "blue"
+
+
+colorValues clr =
+    case clr of
+        Green ->
+            ( "white", "#43B649" )
+
+        Blue ->
+            ( "white", "#51B2D6" )
+
+        White ->
+            ( "black", "white" )
+
+
+type alias Popup =
+    { id : String
+    , text : String
+    , color : Color
+    , stay : Bool
+    , leaving : Bool
+    }
+
+
 type alias Model =
     { msg : String
-    , msgs : List String
-    , info : String
-    , fadingout : Set String
-    , entering : Set String
+    , msgCount : Int
+    , msgs : List Popup
+    , color : Color
+    , stay : Bool
     }
 
 
 init : ( Model, Cmd Msg )
 init =
     ( { msg = ""
+      , msgCount = 0
       , msgs = []
-      , info = ""
-      , fadingout = Set.empty
-      , entering = Set.empty
+      , color = White
+      , stay = True
       }
     , Cmd.none
     )
@@ -43,25 +102,12 @@ init =
 
 type Msg
     = NoOp
+    | UpdateMsg String
     | PopMsg
-    | InputEnter String
-    | MsgText String
-    | Delete String
-    | Fadeout String
-    | Slidein String
-    | RemoveFromEntering String
-
-
-addMsg model msg =
-    if String.length msg == 0 then
-        model
-
-    else
-        { model
-            | msgs = msg :: model.msgs
-            , msg = ""
-            , entering = Set.insert msg model.entering
-        }
+    | RemovePopup Popup
+    | DeleteMsg Popup
+    | SetColor Color
+    | ToggleStay
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -70,26 +116,68 @@ update msg model =
         NoOp ->
             ( model, Cmd.none )
 
-        PopMsg ->
-            ( addMsg model model.msg, Cmd.none )
+        ToggleStay ->
+            ( { model | stay = not model.stay }, Cmd.none )
 
-        InputEnter value ->
-            ( addMsg model value, Cmd.none )
+        SetColor clr ->
+            ( { model | color = clr }, Cmd.none )
 
-        Delete m ->
-            ( { model | msgs = List.filter ((/=) m) model.msgs, fadingout = Set.remove m model.fadingout }, Cmd.none )
-
-        MsgText m ->
+        UpdateMsg m ->
+            -- update text input state
             ( { model | msg = m }, Cmd.none )
 
-        Slidein m ->
-            ( { model | entering = Set.insert m model.entering }, Cmd.none )
+        PopMsg ->
+            -- add msg to msgs (if it has length)
+            if String.length model.msg > 0 then
+                let
+                    popup : Popup
+                    popup =
+                        { id = String.fromInt model.msgCount
+                        , text = model.msg
+                        , color = model.color
+                        , stay = model.stay
+                        , leaving = False
+                        }
+                in
+                ( { model
+                    | msg = ""
+                    , msgCount = model.msgCount + 1
+                    , msgs = popup :: model.msgs
+                  }
+                , if not model.stay then
+                    Process.sleep 5000 |> Task.perform (always (RemovePopup popup))
 
-        Fadeout m ->
-            ( { model | fadingout = Set.insert m model.fadingout }, Cmd.none )
+                  else
+                    Cmd.none
+                )
 
-        RemoveFromEntering m ->
-            ( { model | entering = Set.remove m model.entering }, Cmd.none )
+            else
+                ( model, Cmd.none )
+
+        RemovePopup popup ->
+            -- the 1st step of animated remove of a popup: leave animation
+            --
+            -- if this msg is not in the msgs list already (was deleted manualy
+            -- by the user) - don't add it to leaving set (it won't be properly
+            -- removed by onAnimationsEnd event)
+            ( { model
+                | msgs =
+                    List.map
+                        (\item ->
+                            if item == popup then
+                                { item | leaving = True }
+
+                            else
+                                item
+                        )
+                        model.msgs
+              }
+            , Cmd.none
+            )
+
+        DeleteMsg popup ->
+            -- the 2nd step of animated remove of a popup: actually delete the msg
+            ( { model | msgs = List.filter ((/=) popup) model.msgs }, Cmd.none )
 
 
 
@@ -98,12 +186,35 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
+    let
+        radioColor clr isChecked =
+            label []
+                [ input
+                    [ type_ "radio", name "popcolor", value (stringFromColor clr), style "vertical-align" "middle", style "margin" "0", style "padding" "0", checked isChecked, onInput (always <| SetColor clr) ]
+                    []
+                , span
+                    [ style "display" "inline-block", style "height" "1em", style "width" "1em", style "background-color" (colorValues clr |> Tuple.second), style "vertical-align" "middle", style "border" "1px solid gray" ]
+                    []
+                ]
+    in
     div []
         [ div [ class "bottom" ]
-            [ input
+            [ div [ class "popup-colors" ] <|
+                label []
+                    [ input
+                        [ type_ "checkbox"
+                        , style "vertical-align" "middle"
+                        , checked model.stay
+                        , onInput (always ToggleStay)
+                        ]
+                        []
+                    , text "Stay"
+                    ]
+                    :: List.map (\clr -> radioColor clr <| clr == model.color) colors
+            , input
                 [ value model.msg
-                , onInput MsgText
-                , onInputEnterKey InputEnter
+                , onInput UpdateMsg
+                , onEnterKey PopMsg
                 , style "font-size" "24px"
                 ]
                 []
@@ -113,40 +224,36 @@ view model =
                 ]
                 [ text "pop msg" ]
             ]
-        , div
-            [ class "popups" ]
-            (div [] [ text model.info ]
-                :: List.map
-                    (\m ->
-                        viewPopup
-                            m
-                            (Set.member m model.entering)
-                            (Set.member m model.fadingout)
-                    )
-                    model.msgs
-            )
+        , ul [ class "popups" ] <|
+            List.map
+                (\popup ->
+                    ( popup.id, viewPopup popup )
+                )
+                model.msgs
         ]
 
 
-viewPopup : String -> Bool -> Bool -> Html Msg
-viewPopup m isEntering isFading =
-    div
-        [ class "popup"
-        , onAnimationsEnd
-            [ ( "fadeout", Delete m )
-            , ( "popup", RemoveFromEntering m )
+viewPopup : Popup -> Html Msg
+viewPopup popup =
+    let
+        ( color, bgcolor ) =
+            colorValues popup.color
+    in
+    div [ class "popup enter" ]
+        [ div
+            [ class "popup__body"
+            , classList [ ( "leave", popup.leaving ) ]
+            , onAnimationsEnd [ ( "leave", DeleteMsg popup ) ]
+            , style "color" color
+            , style "background-color" bgcolor
             ]
-        , classList
-            [ ( "fadeout", isFading )
-            , ( "slidein", isEntering )
+            [ text popup.text
+            , span
+                [ class "popup__close"
+                , onClick (RemovePopup popup)
+                ]
+                [ text "✕" ]
             ]
-        ]
-        [ text m
-        , span
-            [ class "close-popup"
-            , onClick (Fadeout m)
-            ]
-            [ text "✕" ]
         ]
 
 
@@ -162,46 +269,3 @@ main =
         , update = update
         , subscriptions = always Sub.none
         }
-
-
-
----- EVENTS ----
-
-
-onAnimationsEnd : List ( String, msg ) -> Html.Attribute msg
-onAnimationsEnd map =
-    let
-        animationNameDecoder : JD.Decoder String
-        animationNameDecoder =
-            JD.field "animationName" JD.string
-    in
-    on "animationend" <|
-        JD.andThen
-            (\name ->
-                case LE.find (Tuple.first >> (==) name) map of
-                    Just ( _, msg ) ->
-                        JD.succeed msg
-
-                    Nothing ->
-                        JD.fail "animationName not mapped to any msg"
-            )
-            animationNameDecoder
-
-
-onInputEnterKey : (String -> msg) -> Html.Attribute msg
-onInputEnterKey tagger =
-    let
-        inputValueOnEnterKey : JD.Decoder String
-        inputValueOnEnterKey =
-            JD.field "code" JD.string
-                |> JD.andThen
-                    (\code ->
-                        if code == "Enter" then
-                            JD.at [ "target", "value" ] JD.string
-
-                        else
-                            JD.fail "not ENTER"
-                    )
-    in
-    on "keydown" <|
-        JD.map tagger inputValueOnEnterKey

@@ -25,51 +25,68 @@ img {
   max-width: 200px;
 }
 
-.popup {
-  margin: 10px 50px;
-  padding: 10px;
-  background-color: white;
-  border-radius: 6px;
-  box-shadow: 0 2px 10px rgba(0,0,0,.25);
-}
-.slidein {
-  animation: popup .2s;
-}
-
-.fadeout {
-  animation: .2s fadeout;
-}
-
-@keyframes popup {
-  from {
-    transform: translateY(-100%);
-  }
-  to {
-    transform: translateY(0%);
-  }
-}
-
-@keyframes fadeout {
-  from {opacity: 1}
-  to {opacity: 0}
-}
-
 .popups {
   position: fixed;
   left: 0;
   top: 0;
   width: 100vw;
+  padding: 0;
+  margin: 0;
 }
 
-.close-popup {
-  float: right;
-  padding: 2px 8px;
-  margin-top: -2px;
-  background-color: lightgray;
-  border-radius: 4px;
+.popup {
+  width: 100%;
+}
+
+.popup__body {
+  position: relative;
+  margin: 10px;
+  padding: 10px 30px;
+  text-align: justify;
+  background-color: white;
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.25);
+}
+
+.popup__body--green {
+  color: white;
+  background-color: #43B649;
+}
+
+.popup__close {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 10px;
+  /* float: right; */
+  /* padding: 2px 8px; */
+  /* margin-top: -2px; */
+  /* background-color: lightgray; */
+  /* border-radius: 4px; */
   user-select: none;
   cursor: pointer;
+  line-height: 1em;
 }
+
+@keyframes enter {
+  from {transform: translateX(100%);}
+  to {transform: translateX(0%);}
+}
+
+@keyframes leave {
+  from {transform: translateX(0%);}
+  to {transform: translateX(100%);}
+}
+
+.enter {
+  animation: .2s enter ease-out;
+}
+
+.leave {
+  animation: .2s leave ease-in;
+}
+
+
 
 .bottom {
   position: fixed;
