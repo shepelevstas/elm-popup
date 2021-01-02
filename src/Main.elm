@@ -11,6 +11,7 @@ import Json.Decode as JD
 import List
 import List.Extra as LE
 import Maybe
+import Modal
 import Process
 import Set exposing (Set)
 import Task
@@ -75,12 +76,32 @@ type alias Popup =
     }
 
 
+defaultPrompt text =
+    { id = "default prompt"
+    , text = text
+    , color = Blue
+    , inputValue = ""
+    , leaving = False
+    }
+
+
 type alias Model =
     { msg : String
     , msgCount : Int
     , msgs : List Popup
+    , prompt : Maybe Prompt
     , color : Color
     , stay : Bool
+    , modalState : Modal.State
+    }
+
+
+type alias Prompt =
+    { id : String
+    , text : String
+    , color : Color
+    , inputValue : String
+    , leaving : Bool
     }
 
 
@@ -89,8 +110,10 @@ init =
     ( { msg = ""
       , msgCount = 0
       , msgs = []
+      , prompt = Nothing
       , color = White
       , stay = True
+      , modalState = Modal.Closed
       }
     , Cmd.none
     )
@@ -108,6 +131,14 @@ type Msg
     | DeleteMsg Popup
     | SetColor Color
     | ToggleStay
+    | UpdatePromptInput String
+    | RemovePrompt
+    | DeletePrompt
+    | PopPrompt
+    | PromptOk
+    | CloseModal
+    | ShowModal
+    | ModalMsg Modal.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -179,6 +210,63 @@ update msg model =
             -- the 2nd step of animated remove of a popup: actually delete the msg
             ( { model | msgs = List.filter ((/=) popup) model.msgs }, Cmd.none )
 
+        UpdatePromptInput text ->
+            case model.prompt of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just prompt ->
+                    ( { model | prompt = Just { prompt | inputValue = text } }, Cmd.none )
+
+        RemovePrompt ->
+            case model.prompt of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just prompt ->
+                    ( { model | prompt = Just { prompt | leaving = True } }, Cmd.none )
+
+        DeletePrompt ->
+            ( { model | prompt = Nothing }, Cmd.none )
+
+        PopPrompt ->
+            if String.length model.msg > 0 then
+                ( { model
+                    | prompt = Just <| defaultPrompt model.msg
+                    , msg = ""
+                  }
+                , Cmd.none
+                )
+
+            else
+                ( model, Cmd.none )
+
+        PromptOk ->
+            case model.prompt of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just prompt ->
+                    ( { model
+                        | msg = prompt.inputValue
+                        , prompt = Just { prompt | leaving = True }
+                      }
+                    , Cmd.none
+                    )
+
+        CloseModal ->
+            ( { model | modalState = Modal.Closed }, Cmd.none )
+
+        ShowModal ->
+            ( { model | modalState = Modal.Showing }, Cmd.none )
+
+        ModalMsg subMsg ->
+            let
+                ( state, cmd ) =
+                    Modal.update subMsg model.modalState
+            in
+            ( { model | modalState = state }, Cmd.map ModalMsg cmd )
+
 
 
 ---- VIEW ----
@@ -223,13 +311,35 @@ view model =
                 , style "font-size" "24px"
                 ]
                 [ text "pop msg" ]
+            , button
+                [ onClick PopPrompt, style "font-size" "24px" ]
+                [ text "prompt" ]
+            , button
+                -- [ onClick <| ModalMsg Modal.Show ]
+                [ onClick ShowModal ]
+                [ text "show modal" ]
             ]
         , ul [ class "popups" ] <|
-            List.map
-                (\popup ->
-                    ( popup.id, viewPopup popup )
-                )
-                model.msgs
+            (case model.prompt of
+                Nothing ->
+                    ( "no-prompt", text "" )
+
+                Just propmt ->
+                    ( "prompt", viewPopInput propmt )
+            )
+                :: List.map
+                    (\popup -> ( popup.id, viewPopup popup ))
+                    model.msgs
+        , Modal.view ModalMsg
+            model.modalState
+            [ style "background-color" "white"
+            , style "padding" "1em"
+            , style "border-radius" ".5em"
+            , style "box-shadow" "0 2px 6px rgba(0,0,0,.5)"
+            ]
+            [ text "This is Modal Content"
+            , button [ onClick (ModalMsg Modal.Close) ] [ text "close" ]
+            ]
         ]
 
 
@@ -239,21 +349,77 @@ viewPopup popup =
         ( color, bgcolor ) =
             colorValues popup.color
     in
-    div [ class "popup enter" ]
+    div [ class "popup" ]
         [ div
-            [ class "popup__body"
+            [ class "popup__body enter"
             , classList [ ( "leave", popup.leaving ) ]
             , onAnimationsEnd [ ( "leave", DeleteMsg popup ) ]
             , style "color" color
             , style "background-color" bgcolor
             ]
             [ text popup.text
+
+            -- CLOSE BTN
             , span
                 [ class "popup__close"
                 , onClick (RemovePopup popup)
                 ]
                 [ text "✕" ]
             ]
+        ]
+
+
+viewPopInput : Prompt -> Html Msg
+viewPopInput prompt =
+    let
+        ( color, bgcolor ) =
+            colorValues prompt.color
+    in
+    div [ class "popup" ]
+        [ div
+            [ class "popup__body enter"
+            , style "z-index" "9999"
+            , classList [ ( "leave", prompt.leaving ) ]
+            , onAnimationsEnd [ ( "leave", DeletePrompt ) ]
+            , style "color" color
+            , style "background-color" bgcolor
+            ]
+            [ div [] [ text prompt.text ]
+            , input
+                [ style "box-sizing" "border-box"
+                , style "width" "100%"
+                , onInput UpdatePromptInput
+                , onEnterKey PromptOk
+                ]
+                []
+            , div
+                [ style "display" "flex"
+                , style "justify-content" "space-around"
+                ]
+                [ button [ onClick RemovePrompt ] [ text "cancel" ]
+                , button [ onClick PromptOk ] [ text "ok" ]
+                ]
+
+            --CLOSE BTN
+            -- , span
+            --     [ class "popup__close" ]
+            --     [ text "✕" ]
+            ]
+
+        -- SHADE
+        , div
+            [ class "fadein"
+            , style "position" "fixed"
+            , style "left" "0"
+            , style "top" "0"
+            , style "width" "100vw"
+            , style "height" "100vh"
+            , style "background-color" "rgba(0,0,0,.5)"
+            , style "z-index" "9998"
+            , onClick RemovePrompt
+            , classList [ ( "fadeout", prompt.leaving ) ]
+            ]
+            []
         ]
 
 
